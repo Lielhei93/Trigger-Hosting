@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BotCloud – אחסון בוטים</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef1f6;--card:#fff;--ink:#1b2233;--mute:#6b7488;--line:#dde2ec;--accent:#2f5bff;--ok:#1e9e6a;--bad:#d64545;--log:#141a2a}
+@media (prefers-color-scheme:dark){:root{--bg:#10141f;--card:#192031;--ink:#e8ecf6;--mute:#8b95ab;--line:#2a3349;--accent:#6c8cff;--ok:#3ccf91;--bad:#ff6b6b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Heebo',system-ui,sans-serif;line-height:1.5}
+header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--line)}
+.logo{font-weight:800;font-size:22px;letter-spacing:-.5px}.logo b{color:var(--accent)}
+main{max-width:920px;margin:0 auto;padding:28px 18px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--card);padding:8px 14px;border-radius:8px}
+button:hover{border-color:var(--accent)}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+.danger{color:var(--bad)}
+input,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);margin-top:4px}
+label{display:block;font-size:14px;color:var(--mute);margin-top:14px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px}
+#auth{max-width:380px;margin:60px auto}#auth h1{margin:0 0 6px;font-size:26px}
+.err{color:var(--bad);min-height:22px;margin-top:10px;font-size:14px}
+.bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.bar h2{margin:0}
+.bot{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:14px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--mute)}.dot.on{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 25%,transparent)}
+.bot h3{margin:0;font-size:18px}.meta{color:var(--mute);font-size:13px;direction:ltr;text-align:right}
+pre{background:var(--log);color:#cfd7ea;border-radius:10px;padding:12px;margin:14px 0 0;max-height:260px;overflow:auto;font-size:12.5px;direction:ltr;text-align:left;white-space:pre-wrap}
+.empty{text-align:center;color:var(--mute);padding:50px 0}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);width:min(440px,92vw);padding:24px}
+dialog::backdrop{background:rgba(10,14,25,.55)}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<header><div class="logo">Bot<b>Cloud</b></div><div class="row hide" id="userbox"><span id="who"></span><button id="logout">יציאה</button></div></header>
+<main>
+  <section id="auth" class="panel">
+    <h1 id="authTitle">התחברות</h1>
+    <div style="color:var(--mute)">מעלים ZIP, מדביקים טוקן, והבוט רץ כל הזמן.</div>
+    <label>שם משתמש<input id="u" autocomplete="username"></label>
+    <label>סיסמה<input id="p" type="password" autocomplete="current-password"></label>
+    <div class="err" id="authErr"></div>
+    <div class="row"><button class="primary grow" id="authBtn">התחבר</button><button id="authSwitch">אין לי חשבון</button></div>
+  </section>
+
+  <section id="app" class="hide">
+    <div class="bar"><h2>הבוטים שלי</h2><button class="primary" id="newBtn">בוט חדש</button></div>
+    <div id="list"></div>
+  </section>
+</main>
+
+<dialog id="dlg">
+  <h2 id="dlgTitle" style="margin:0">בוט חדש</h2>
+  <input type="hidden" id="editId">
+  <label>שם הבוט<input id="bName"></label>
+  <label>טוקן הבוט<input id="bToken" type="password" autocomplete="off" placeholder="נשמר בשרת ולא מוצג שוב"></label>
+  <label>סוג<select id="bRuntime"><option value="node">Node.js (ברירת מחדל: node index.js)</option><option value="python">Python (ברירת מחדל: python main.py)</option></select></label>
+  <label>פקודת הפעלה (לא חובה)<input id="bCmd" dir="ltr" placeholder="node index.js"></label>
+  <label>קובץ ZIP של הבוט<input id="bFile" type="file" accept=".zip"></label>
+  <div class="err" id="dlgErr"></div>
+  <div class="row"><button class="primary grow" id="saveBtn">שמור</button><button id="cancelBtn">ביטול</button></div>
+</dialog>
+
+<script>
+const $=id=>document.getElementById(id);
+let mode='login', openLogs=null, timer=null;
+const api=async(url,opt={})=>{
+  if(opt.body&&!(opt.body instanceof FormData)){opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify(opt.body)}
+  const r=await fetch(url,opt),d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.error||'שגיאה');return d};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ----- התחברות -----
+$('authSwitch').onclick=()=>{mode=mode==='login'?'register':'login';
+  $('authTitle').textContent=mode==='login'?'התחברות':'יצירת חשבון';
+  $('authBtn').textContent=mode==='login'?'התחבר':'צור חשבון';
+  $('authSwitch').textContent=mode==='login'?'אין לי חשבון':'יש לי חשבון';$('authErr').textContent=''};
+$('authBtn').onclick=async()=>{try{
+  const d=await api('/api/'+mode,{method:'POST',body:{name:$('u').value.trim(),password:$('p').value}});enter(d.name)}
+  catch(e){$('authErr').textContent=e.message}};
+$('logout').onclick=async()=>{await api('/api/logout',{method:'POST'});location.reload()};
+function enter(name){$('auth').classList.add('hide');$('app').classList.remove('hide');$('userbox').classList.remove('hide');$('who').textContent=name;load();
+  clearInterval(timer);timer=setInterval(()=>{load();if(openLogs)showLogs(openLogs)},4000)}
+api('/api/me').then(d=>enter(d.name)).catch(()=>{});
+
+// ----- רשימת בוטים -----
+let bots=[];
+async function load(){try{bots=await api('/api/bots');render()}catch{}}
+function render(){
+  if(!bots.length){$('list').innerHTML='<div class="empty">עוד אין לך בוטים. לחץ על "בוט חדש" והעלה ZIP.</div>';return}
+  const keep={};document.querySelectorAll('pre[data-id]').forEach(p=>keep[p.dataset.id]=p.textContent);
+  $('list').innerHTML=bots.map(b=>`<div class="bot"><div class="row">
+    <span class="dot ${b.running?'on':''}"></span>
+    <div class="grow"><h3>${esc(b.name)}</h3><div class="meta">${b.runtime} · ${esc(b.startCmd)} · ${b.running?'פעיל':'כבוי'}</div></div>
+    ${b.running?`<button onclick="act('${b.id}','stop')">עצור</button><button onclick="act('${b.id}','restart')">הפעל מחדש</button>`
+                :`<button class="primary" onclick="act('${b.id}','start')">הפעל</button>`}
+    <button onclick="toggleLogs('${b.id}')">לוגים</button>
+    <button onclick="edit('${b.id}')">עריכה</button>
+    <button class="danger" onclick="del('${b.id}')">מחק</button></div>
+    ${openLogs===b.id?`<pre data-id="${b.id}">${esc(keep[b.id]||'טוען...')}</pre>`:''}</div>`).join('');
+  if(openLogs)showLogs(openLogs)}
+async function act(id,a){await api(`/api/bots/${id}/${a}`,{method:'POST'});setTimeout(load,a==='start'?300:1500);load()}
+async function del(id){if(confirm('למחוק את הבוט וכל הקבצים שלו?')){await api('/api/bots/'+id,{method:'DELETE'});load()}}
+function toggleLogs(id){openLogs=openLogs===id?null:id;render()}
+async function showLogs(id){try{const d=await api(`/api/bots/${id}/logs`);const pre=document.querySelector(`pre[data-id="${id}"]`);
+  if(pre){const bottom=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-20;pre.textContent=d.logs.join('\n')||'(אין לוגים עדיין)';if(bottom)pre.scrollTop=pre.scrollHeight}}catch{}}
+
+// ----- יצירה / עריכה -----
+function openDlg(b){$('dlgErr').textContent='';$('editId').value=b?b.id:'';$('dlgTitle').textContent=b?'עריכת בוט':'בוט חדש';
+  $('bName').value=b?b.name:'';$('bName').disabled=!!b;$('bToken').value='';$('bRuntime').value=b?b.runtime:'node';$('bRuntime').disabled=!!b;
+  $('bCmd').value=b?b.startCmd:'';$('bFile').value='';$('bToken').placeholder=b?'השאר ריק כדי לא לשנות':'נשמר בשרת ולא מוצג שוב';$('dlg').showModal()}
+$('newBtn').onclick=()=>openDlg();
+function edit(id){openDlg(bots.find(b=>b.id===id))}
+$('cancelBtn').onclick=()=>$('dlg').close();
+$('saveBtn').onclick=async()=>{try{
+  const id=$('editId').value,f=new FormData();
+  f.append('name',$('bName').value);f.append('token',$('bToken').value);f.append('runtime',$('bRuntime').value);f.append('startCmd',$('bCmd').value);
+  if($('bFile').files[0])f.append('file',$('bFile').files[0]);
+  await api(id?'/api/bots/'+id:'/api/bots',{method:id?'PUT':'POST',body:f});$('dlg').close();load()}
+  catch(e){$('dlgErr').textContent=e.message}};
+</script>
+</body>
+</html>
